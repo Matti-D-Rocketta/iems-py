@@ -11,7 +11,7 @@ requires-python = ">=3.11"
 authors = [{ name = "Matthieu Matignon" }]
 license = { text = "MIT" }
 dependencies = [
-    "numpy>=1.26",
+    "numpy>=2.0",
     "scipy>=1.11",
     "pydantic>=2.5",
     "matplotlib>=3.8",
@@ -42,7 +42,7 @@ src = ["src", "tests", "examples"]
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "N", "SIM", "RUF", "ANN"]
 ignore = [
-    "N803", "N806", "N815",   # notations physiques (P_fc, Ts_ems, E_cap…) volontaires
+    "N802", "N803", "N806", "N815",   # notations physiques (P_fc, Ts_ems, E_cap…) volontaires
     "RUF001", "RUF002", "RUF003",  # caractères grecs/accentués dans docstrings et commentaires
     "ANN401",
 ]
