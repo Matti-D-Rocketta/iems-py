@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "iems"
+version = "0.1.0"
+description = "iEMS : gestion d'énergie temps réel d'un véhicule hybride pile à combustible / batterie (PMP en ligne + règles + reconnaissance de conduite)"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Matthieu Matignon" }]
+license = { text = "MIT" }
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "pydantic>=2.5",
+    "matplotlib>=3.8",
+]
+
+[project.optional-dependencies]
+api = ["fastapi>=0.110", "uvicorn>=0.29"]
+ml = ["torch>=2.2", "scikit-fuzzy>=0.4"]
+dashboard = ["streamlit>=1.33"]
+dev = ["pytest>=8", "ruff>=0.4"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+iems = ["data/*.csv"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+markers = ["slow: tests de plusieurs secondes (calibration ECMS, campagne multi-cycles)"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests", "examples"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "N", "SIM", "RUF", "ANN"]
+ignore = [
+    "N803", "N806", "N815",   # notations physiques (P_fc, Ts_ems, E_cap…) volontaires
+    "RUF001", "RUF002", "RUF003",  # caractères grecs/accentués dans docstrings et commentaires
+    "ANN401",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["ANN"]
+"examples/*" = ["ANN"]
