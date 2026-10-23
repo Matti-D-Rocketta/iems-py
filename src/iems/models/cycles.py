@@ -21,6 +21,7 @@ from importlib import resources
 
 import numpy as np
 from numpy.typing import NDArray
+from scipy.interpolate import PchipInterpolator
 
 from iems.patterns import DrivingPattern
 
@@ -28,6 +29,7 @@ FloatArray = NDArray[np.float64]
 IntArray = NDArray[np.int64]
 
 KMH = 1.0 / 3.6
+_MIN_DV = 3.0  # m/s : écart minimal entre deux vitesses cibles successives
 _MASS_REF_KG = 1800.0  # masse de référence pour plafonner l'accélération en puissance
 
 
@@ -51,10 +53,15 @@ class Cycle:
         return float(np.trapezoid(self.v, self.t))
 
     def resample(self, dt: float) -> Cycle:
-        """Rééchantillonne sur une grille régulière de pas ``dt`` (vitesse linéaire)."""
+        """Rééchantillonne sur une grille régulière de pas ``dt``.
+
+        Interpolation cubique monotone (PCHIP) : pas de dépassement (vitesses ≥ 0, arrêts
+        préservés) et accélération continue, donc pas de marches de puissance artificielles
+        entre deux points à 1 Hz.
+        """
         n = round(self.duration / dt) + 1
         t_new = self.t[0] + dt * np.arange(n)
-        v_new = np.interp(t_new, self.t, self.v)
+        v_new = np.maximum(PchipInterpolator(self.t, self.v)(np.minimum(t_new, self.t[-1])), 0.0)
         labels = None
         if self.labels is not None:
             idx = np.clip(np.searchsorted(self.t, t_new, side="right") - 1, 0, len(self.t) - 1)
@@ -65,35 +72,46 @@ class Cycle:
 # --------------------------------------------------------------------------------------
 # Briques de construction de profils (1 Hz)
 # --------------------------------------------------------------------------------------
-def _ramp(v_from: float, v_to: float, rate: float, p_cap_w: float | None) -> list[float]:
+def _ramp(
+    v_from: float, v_to: float, rate: float, p_cap_w: float | None, jerk: float = 1.0
+) -> list[float]:
     """Rampe de vitesse 1 Hz de ``v_from`` à ``v_to`` (exclu ``v_from``, inclus ``v_to``).
 
-    En accélération, le taux est plafonné par ``p_cap_w / (m·v)`` (puissance roue max).
+    L'accélération s'établit et retombe avec un jerk borné (comme un conducteur réel) :
+    sans cela, la demande passe de 5 à 55 kW en un échantillon, ce qu'aucune PàC limitée
+    en rampe ne peut suivre. En accélération, le taux est aussi plafonné par
+    ``p_cap_w / (m·v)`` (puissance roue max).
     """
     out: list[float] = []
-    v = v_from
-    if v_to >= v_from:
-        while v < v_to - 1e-9:
-            a = rate
-            if p_cap_w is not None:
-                a = min(a, p_cap_w / (_MASS_REF_KG * max(v, 3.0)))
-            v = min(v + a, v_to)
-            out.append(v)
-    else:
-        while v > v_to + 1e-9:
-            v = max(v - rate, v_to)
-            out.append(v)
+    v, a = v_from, 0.0
+    sign = 1.0 if v_to >= v_from else -1.0
+    while sign * (v_to - v) > 1e-6:
+        a_cap = rate
+        if p_cap_w is not None and sign > 0:
+            a_cap = min(a_cap, p_cap_w / (_MASS_REF_KG * max(v, 3.0)))
+        remaining = sign * (v_to - v)
+        a_land = max(np.sqrt(2.0 * jerk * remaining), 0.1)  # retombée douce de l'accélération
+        a = min(a + jerk, a_cap, a_land)
+        v = v + sign * a
+        if sign * (v_to - v) < 0:
+            v = v_to
+        out.append(v)
     return out
 
 
-def _cruise(v_peak: float, duration: int, amp: float, phase: float) -> list[float]:
-    """Croisière ondulée sous ``v_peak`` (le pic est atteint, jamais dépassé)."""
+def _cruise(v: float, duration: int, amp: float) -> list[float]:
+    """Croisière ondulée sous ``v`` qui commence et finit exactement à ``v``.
+
+    Période ≥ 40 s environ ; l'amplitude est réduite pour les croisières courtes afin de ne
+    pas créer d'accélérations parasites (une ondulation de 4 % sur 8 s à 130 km/h, c'est
+    ±25 kW de demande).
+    """
     if duration <= 0:
         return []
+    n = max(1, round(duration / 40))
+    amp_eff = amp * min(1.0, duration / 40.0)
     k = np.arange(1, duration + 1)
-    periods = max(duration / 1.5, 8.0)
-    dip = amp * 0.5 * (1.0 - np.cos(2.0 * np.pi * k / periods + phase))
-    return list(v_peak * (1.0 - dip))
+    return list(v * (1.0 - amp_eff * 0.5 * (1.0 - np.cos(2.0 * np.pi * n * k / duration))))
 
 
 @dataclass(frozen=True)
@@ -108,6 +126,7 @@ class SegmentSpec:
     p_stop: float
     amp: float = 0.04
     p_wheel_cap_w: float = 45e3
+    jerk: float = 0.8  # m/s³
 
 
 SEGMENT_SPECS: dict[DrivingPattern, SegmentSpec] = {
@@ -117,8 +136,19 @@ SEGMENT_SPECS: dict[DrivingPattern, SegmentSpec] = {
     DrivingPattern.AUTOROUTE: SegmentSpec(
         (105, 130), (0.3, 0.6), (0.3, 0.6), (60, 160), (5, 10), 0.0, amp=0.03
     ),
+    # Sportif : fortes accélérations à basse vitesse, freinages appuyés, croisières courtes.
+    # Puissance roue plafonnée à 35 kW : au-delà, passer d'une croisière à 5 kW à une pleine
+    # accélération en 1-2 s exige plus que PàC (5 kW/s) + batterie (30 kW) ne peuvent fournir.
     DrivingPattern.SPORTIF: SegmentSpec(
-        (55, 105), (2.0, 3.0), (2.5, 3.5), (3, 10), (2, 5), 0.12, amp=0.02, p_wheel_cap_w=60e3
+        (45, 95),
+        (2.0, 2.8),
+        (2.5, 3.2),
+        (6, 15),
+        (2, 5),
+        0.15,
+        amp=0.02,
+        p_wheel_cap_w=35e3,
+        jerk=1.5,
     ),
 }
 
@@ -132,21 +162,19 @@ def _segment(
     v = v_start
     while len(out) < duration:
         v_tgt = rng.uniform(*spec.v_kmh) * KMH
+        if 0.0 < abs(v_tgt - v) < _MIN_DV:  # pas de micro-impulsion d'accélération
+            v_tgt = v + _MIN_DV if v_tgt > v or v + _MIN_DV <= spec.v_kmh[1] * KMH else v - _MIN_DV
         out += _ramp(
             v,
             v_tgt,
             rng.uniform(*spec.accel) if v_tgt > v else rng.uniform(*spec.decel),
             spec.p_wheel_cap_w,
+            spec.jerk,
         )
-        out += _cruise(
-            v_tgt,
-            int(rng.integers(*spec.cruise_s, endpoint=True)),
-            spec.amp,
-            float(rng.uniform(0, 2 * np.pi)),
-        )
+        out += _cruise(v_tgt, int(rng.integers(*spec.cruise_s, endpoint=True)), spec.amp)
         v = out[-1] if out else v
         if rng.random() < spec.p_stop:
-            out += _ramp(v, 0.0, rng.uniform(*spec.decel), None)
+            out += _ramp(v, 0.0, rng.uniform(*spec.decel), None, spec.jerk)
             out += [0.0] * int(rng.integers(*spec.stop_s, endpoint=True))
             v = 0.0
     return out[:duration]
@@ -284,15 +312,6 @@ _WLTC_PHASES: tuple[_WltcPhase, ...] = (
 )
 
 
-def _cruise_closed(v: float, duration: int, amp: float) -> list[float]:
-    """Croisière ondulée qui commence et finit exactement à ``v`` (pas de saut de vitesse)."""
-    if duration <= 0:
-        return []
-    n = max(1, round(duration / 40))
-    k = np.arange(1, duration + 1)
-    return list(v * (1.0 - amp * 0.5 * (1.0 - np.cos(2.0 * np.pi * n * k / duration))))
-
-
 def _build_phase(ph: _WltcPhase, k: float) -> list[float] | None:
     """Profil 1 Hz d'une phase ; ``k`` met à l'échelle les vitesses autres que le max.
 
@@ -321,7 +340,7 @@ def _build_phase(ph: _WltcPhase, k: float) -> list[float] | None:
     out: list[float] = []
     for ramp, tgt, hold in zip(ramps, targets, holds, strict=True):
         out += ramp
-        out += _cruise_closed(tgt, hold, 0.05) if tgt > 0 else [0.0] * hold
+        out += _cruise(tgt, hold, 0.05) if tgt > 0 else [0.0] * hold
     return out
 
 

@@ -37,10 +37,21 @@ class FuelCellParams(_Params):
     P_max_W: float = Field(95e3, gt=0)  # TODO-thèse
     P_min_W: float = Field(1e3, ge=0)  # TODO-thèse : puissance de ralenti
     ramp_W_per_s: float = Field(5e3, gt=0)  # TODO-thèse : rampe BOP
-    # Carte η(P/P_max) : ≈0,40 à faible charge, pic ≈0,58 vers 20-30 %, ≈0,45 à pleine charge
-    # (littérature : allure typique d'un système PEMFC automobile avec auxiliaires).
-    eta_map_frac: tuple[float, ...] = (0.0, 0.05, 0.10, 0.20, 0.30, 0.50, 0.75, 1.0)  # TODO-thèse
-    eta_map_eta: tuple[float, ...] = (0.40, 0.47, 0.53, 0.58, 0.58, 0.54, 0.49, 0.45)  # TODO-thèse
+    # Carte η(P/P_max) en cloche : ≈0,40 à 3 %, pic ≈0,58 vers 20 %, ≈0,45 à pleine charge
+    # (littérature : allure typique d'un système PEMFC automobile avec auxiliaires). Les points
+    # sont cohérents avec une consommation convexe à débit de ralenti non nul (≈ 3 kW d'H2,
+    # cf. fuel_cell.py), d'où η ≈ 0,22 à 1 % de charge.
+    eta_map_frac: tuple[float, ...] = (0.01, 0.05, 0.10, 0.20, 0.30, 0.50, 0.75, 1.0)  # TODO-thèse
+    eta_map_eta: tuple[float, ...] = (
+        0.221,
+        0.480,
+        0.555,
+        0.580,
+        0.571,
+        0.536,
+        0.491,
+        0.450,
+    )  # TODO-thèse
     lhv_J_per_kg: float = LHV_H2_J_PER_KG
 
     @model_validator(mode="after")
@@ -51,6 +62,8 @@ class FuelCellParams(_Params):
             raise ValueError("eta_map_frac doit être strictement croissante")
         if not all(0 < e < 1 for e in self.eta_map_eta):
             raise ValueError("les rendements doivent être dans ]0, 1[")
+        if len(self.eta_map_frac) < 3 or self.eta_map_frac[0] <= 0:
+            raise ValueError("au moins 3 points de carte, à puissance strictement positive")
         if self.P_min_W >= self.P_max_W:
             raise ValueError("P_min_W doit être < P_max_W")
         return self
@@ -104,7 +117,7 @@ class EMSParams(_Params):
 
     # Co-état λ (facteur d'équivalence, sans dimension grâce à k_h, cf. optimizer.py).
     # λ0 calibré en M1 par dichotomie ECMS sur WLTC (voir examples/compare_strategies.py).
-    lambda0: float = 2.0  # TODO-thèse : recalé par calibration ecms_const (M1)
+    lambda0: float = 1.55  # TODO-thèse : recalé par calibration ecms_const (M1)
     Kp: float = 10.0  # TODO-thèse : gain proportionnel d'adaptation du co-état
     lambda_min: float = 0.5
     lambda_max: float = 5.0
@@ -117,13 +130,16 @@ class EMSParams(_Params):
     v_norm_max: float = 36.1  # 130 km/h : vitesse de normalisation
 
     # Admissibilité : marge de sécurité appliquée aux limites batterie dans l'anticipation.
-    safety_margin: float = Field(0.15, ge=0, lt=1)
+    safety_margin: float = Field(0.05, ge=0, lt=1)  # relative
+    safety_margin_W: float = Field(1e3, ge=0)  # absolue (W)
+    prediction_margin: float = Field(0.10, ge=0, lt=1)  # relative à la demande prédite
 
     # DPR v1 (règles à seuils sur fenêtre glissante).
     dpr_window_s: float = Field(60.0, gt=0)
 
     # Prédicteur v1 (oracle bruité).
-    predictor_noise: float = Field(0.03, ge=0)  # écart-type relatif de la marche aléatoire / s
+    predictor_noise: float = Field(0.05, ge=0)  # écart-type du biais d'amplitude à t+Hp
+    predictor_time_warp: float = Field(0.10, ge=0)  # écart-type de l'étirement temporel
     seed: int = 42
 
     # Baseline « power follower » + hystérésis SOC.

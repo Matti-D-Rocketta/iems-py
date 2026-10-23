@@ -10,8 +10,8 @@ Trois couches de limites sur la consigne PàC du prochain pas EMS :
    de ``r_fc`` par seconde, la consigne d'aujourd'hui hérite d'un **plancher** et d'un
    **plafond** anticipés (la PàC « se prépare » à une accélération ou à un freinage).
    Les limites batterie sont minorées de ``safety_margin`` (bruit de prédiction, dérive SOC).
-3. **Synthèse** : intersection des deux, priorité au plancher (tenir la traction) si elle
-   est vide.
+3. **Synthèse** : intersection des deux ; si elle est vide (plancher > plafond, typiquement
+   une marche de +40 kW en 1 s), consigne au milieu, ce qui répartit l'érosion des marges.
 
 Les 9 candidats sont construits par quarts d'écart entre la puissance courante (ramenée dans
 la plage utilisable) et chacune des bornes. Si la plage est dégénérée (bornes confondues),
@@ -68,6 +68,17 @@ def interval_extrema(
     return p_max, p_min, body.mean(axis=1)
 
 
+def dilate(
+    p_max: NDArray[np.float64], p_min: NDArray[np.float64]
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Robustesse à une erreur de calendrier d'un intervalle : max/min glissant sur ±1."""
+    if len(p_max) < 2:
+        return p_max, p_min
+    hi = np.maximum(p_max, np.maximum(np.r_[p_max[1:], p_max[-1]], np.r_[p_max[0], p_max[:-1]]))
+    lo = np.minimum(p_min, np.minimum(np.r_[p_min[1:], p_min[-1]], np.r_[p_min[0], p_min[:-1]]))
+    return hi, lo
+
+
 def anticipation_bounds(
     p_max: NDArray[np.float64],
     p_min: NDArray[np.float64],
@@ -77,13 +88,20 @@ def anticipation_bounds(
 ) -> tuple[float, float]:
     """Plancher et plafond sur la consigne PàC, déduits de la demande prédite par intervalle."""
     ems = cfg.ems
+    bp = battery.p
+    # Limites évaluées au SOC le plus défavorable atteignable en un pas EMS (près des bornes,
+    # le dérating BMS se resserre pendant que la consigne est bloquée), puis minorées d'une
+    # marge relative et absolue (erreur de prédiction).
+    d_soc = max(bp.P_dis_max_W, bp.P_ch_max_W) * ems.Ts_ems / (bp.eta_dis * bp.E_cap_J)
     keep = 1.0 - ems.safety_margin
-    P_dis = battery.discharge_limit(soc) * keep
-    P_ch = battery.charge_limit(soc) * keep
+    P_dis = max(battery.discharge_limit(soc - d_soc) * keep - ems.safety_margin_W, 0.0)
+    P_ch = max(battery.charge_limit(soc + d_soc) * keep - ems.safety_margin_W, 0.0)
     # Marge de rampe : à partir de l'intervalle 2, la PàC peut encore bouger de r·Ts par pas.
     slack = cfg.fuel_cell.ramp_W_per_s * ems.Ts_ems * np.maximum(np.arange(len(p_max)) - 1, 0)
-    floor = float(np.max(p_max - P_dis - slack))
-    cap = np.maximum(p_min, cfg.vehicle.P_aux_W) + P_ch
+    # Marge de prédiction proportionnelle à la demande : l'erreur croît avec elle.
+    k = ems.prediction_margin
+    floor = float(np.max(p_max + k * np.abs(p_max) - P_dis - slack))
+    cap = np.maximum(p_min - k * np.abs(p_min), cfg.vehicle.P_aux_W) + P_ch
     ceiling = float(np.min(cap + slack))
     return floor, ceiling
 
@@ -106,12 +124,15 @@ def build_candidates(
     P_lo, P_hi = fc.ramp_limits(P_fc_now, ems.Ts_ems)
 
     p_max, p_min, p_mean = interval_extrema(np.asarray(P_dem_pred, dtype=float), ems.substeps)
-    floor, ceiling = anticipation_bounds(p_max, p_min, soc, cfg, battery)
+    floor, ceiling = anticipation_bounds(*dilate(p_max, p_min), soc, cfg, battery)
     conflict = floor > ceiling
+    if conflict:
+        # Les marges sont conservatrices : couper la poire en deux laisse les deux limites
+        # réelles (sans marge) respectées tant que le recouvrement reste inférieur aux marges.
+        floor = ceiling = 0.5 * (floor + ceiling)
 
     lo = max(P_lo, min(floor, P_hi))
-    hi = min(P_hi, ceiling)
-    hi = max(hi, lo)  # en conflit, le plancher (traction) l'emporte
+    hi = max(min(P_hi, ceiling), lo)
 
     if hi - lo < _DEGENERATE_EPS_W:
         P_fc = np.full(N_CANDIDATES, lo)  # vecteur de secours
