@@ -3,10 +3,16 @@
 v1 : **oracle bruité**. On lit la tranche future du cycle et on la déforme de deux façons,
 tirées à chaque appel (graine fixée : déterministe) :
 
-* **erreur de calendrier** : la tranche est étirée/comprimée dans le temps d'un facteur
-  ``1 + β`` (une accélération prévue arrive un peu trop tôt ou trop tard) ;
-* **erreur d'amplitude** : biais multiplicatif ``γ·τ/Hp`` qui croît linéairement de 0 (instant
-  courant exact) à ``γ`` en bout d'horizon.
+* **erreur de calendrier** : le temps prédit est déformé, ``τ' = τ + β·τ²/Hp`` (une
+  accélération prévue arrive trop tôt ou trop tard, jusqu'à ``β·Hp`` en bout d'horizon) ;
+* **erreur d'amplitude** : biais multiplicatif ``γ·(τ/Hp)²`` qui vaut ``γ`` en bout d'horizon.
+
+Les deux erreurs sont **d'ordre 2 en τ** : nulles en valeur *et en pente* à l'instant
+courant. C'est la propriété physique d'un prédicteur embarqué : la vitesse et l'accélération
+courantes sont mesurées (requête de couple), seul le futur est incertain. Un biais linéaire en
+τ imposerait au contraire une accélération fantôme ``γ·v/Hp`` dès τ = 0, soit ±20 kW à
+130 km/h pour 9 % d'erreur en bout d'horizon : une erreur de 1 km/h sur la vitesse à 1 s
+« vaut » 15 kW de puissance.
 
 β et γ suivent des processus AR(1) d'un appel à l'autre (corrélation ``rho``) : comme un
 prédicteur réel, l'erreur est persistante, elle ne saute pas aléatoirement d'une seconde à
@@ -15,8 +21,8 @@ l'autre (un bruit indépendant à chaque appel fait osciller les décisions de l
 Pourquoi pas un bruit blanc ou une marche aléatoire sur la vitesse : la demande de puissance
 dépend de l'accélération, donc de la *dérivée* de la vitesse prédite. Un bruit qui oscille
 seconde par seconde crée des accélérations fantômes (± 0,9 m/s² à 110 km/h pour 3 %/s, soit
-± 50 kW) qui n'ont rien de réaliste. Les deux erreurs ci-dessus sont lisses : l'accélération
-prédite reste celle du cycle, à ``(1+β)`` près, plus ``γ·v/Hp``.
+± 50 kW) qui n'ont rien de réaliste. Les deux erreurs ci-dessus sont lisses et s'annulent
+avec leur dérivée à l'instant courant.
 
 v2 : LSTM (torch, optionnel) + filtre exponentiel en post-traitement, même interface.
 """
@@ -42,7 +48,7 @@ class SpeedPredictor(Protocol):
 
 
 class NoisyOraclePredictor:
-    """Oracle bruité : tranche future du cycle, étirée dans le temps et biaisée en amplitude."""
+    """Oracle bruité : tranche future du cycle, déformée en temps et en amplitude (ordre 2 en τ)."""
 
     def __init__(
         self,
@@ -62,7 +68,7 @@ class NoisyOraclePredictor:
         self.seed = seed
         self.rho = rho
         self._tau = np.arange(self.n_h + 1, dtype=float)  # en pas modèle
-        self._ramp = self._tau / max(self.n_h, 1)
+        self._ramp2 = (self._tau / max(self.n_h, 1)) ** 2
         self.reset()
 
     def reset(self) -> None:
@@ -82,5 +88,6 @@ class NoisyOraclePredictor:
         self._gamma = self.rho * self._gamma + innov * float(self.rng.normal(0.0, self.noise))
         beta = float(np.clip(self._beta, -0.5, 0.5))
         gamma = self._gamma
-        warped = np.interp(np.minimum(self._tau * (1.0 + beta), self.n_h), self._tau, future)
-        return np.maximum(warped * (1.0 + gamma * self._ramp), 0.0)
+        tau_w = np.clip(self._tau * (1.0 + beta * self._tau / max(self.n_h, 1)), 0.0, self.n_h)
+        warped = np.interp(tau_w, self._tau, future)
+        return np.maximum(warped * (1.0 + gamma * self._ramp2), 0.0)

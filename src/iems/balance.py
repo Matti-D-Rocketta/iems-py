@@ -1,16 +1,28 @@
 """Balance : pourcentage d'utilisation batterie → SOC cible → co-état λ.
 
-v1 : l'usage batterie est lu dans une **table interpolée** (bilinéaire) indexée par le schéma
-de conduite, la vitesse normalisée et le SOC normalisé. La table est construite à partir de
-l'usage nominal par schéma (sportif ≈ 85 %, autoroute ≈ 30 %…) modulé par le SOC (SOC haut →
-on peut davantage solliciter la batterie) et la vitesse. v2 : contrôleur flou (scikit-fuzzy)
-à interface identique.
+Pipeline du bloc (section 4.3 de la passation) :
 
-SOC cible : point de la plage de SOC atteignable en fin d'horizon ``Hp``, pondéré par l'usage
-(usage 1 → bas de la plage, la batterie fournit au maximum ; usage 0 → haut de la plage).
+1. **Usage batterie** ``u ∈ [0, 1] = f(v_norm, SOC_norm, schéma)``. v1 : table bilinéaire par
+   schéma, construite à partir de trois effets explicites (v2 : contrôleur flou, même
+   interface) :
 
-Co-état : ``λ(t) = λ0 + Kp · (SOC_target − SOC(t))`` (adaptation proportionnelle type A-ECMS),
-saturé dans ``[λ_min, λ_max]``.
+   * **schéma de conduite** : usage nominal (sportif ≈ 0,85 ; autoroute ≈ 0,30 ; trafic et
+     urbain intermédiaires). ``u = 0,5`` est neutre (λ = λ0) ; au-dessus, l'EMS sollicite la
+     batterie, en dessous il la recharge ;
+   * **réserve cinétique** : la référence de SOC baisse avec la vitesse,
+     ``SOC_ref(v) = soc_ref − kinetic_recovery · ½·m·v² / E_cap``. À 120 km/h, le véhicule
+     « stocke » ≈ 1 MJ d'énergie cinétique dont une partie reviendra dans la batterie au
+     freinage : il faut lui laisser la place (règle classique des HEV, cf. gestion du SOC
+     Toyota THS ; littérature : SOC de référence fonction de la vitesse) ;
+   * **ancrage SOC** : ``u`` croît avec l'écart ``SOC − SOC_ref(v)`` (gain ``usage_soc_gain``),
+     ce qui ramène le SOC vers sa référence : c'est le terme proportionnel du charge-sustaining.
+
+2. **SOC cible** : plage de SOC atteignable en fin d'horizon ``Hp`` (intégration des limites
+   batterie), ``SOC_target = hi − u · (hi − lo)`` : usage 1 → bas de la plage (la batterie
+   fournit au maximum), usage 0 → haut de la plage.
+
+3. **Co-état** : ``λ = λ0 + Kp · (SOC_target − SOC)`` (adaptation proportionnelle type A-ECMS),
+   saturé dans ``[λ_min, λ_max]``.
 """
 
 from __future__ import annotations
@@ -24,33 +36,45 @@ from iems.config import IEMSConfig
 from iems.models.battery import Battery
 from iems.patterns import DrivingPattern
 
-_GRID = np.linspace(0.0, 1.0, 5)  # nœuds de la table en v_norm et SOC_norm
+N_GRID = 9
+_GRID = np.linspace(0.0, 1.0, N_GRID)  # nœuds de la table en v_norm et SOC_norm
 
 
 @dataclass(frozen=True)
 class BalanceOutput:
     usage: float  # pourcentage d'utilisation batterie ∈ [0, 1]
+    soc_ref_v: float  # référence de SOC à la vitesse courante (réserve cinétique déduite)
     soc_lo: float  # bas de la plage atteignable en fin d'horizon
     soc_hi: float  # haut de la plage atteignable
     soc_target: float
     lam: float  # co-état (facteur d'équivalence, sans dimension)
 
 
+def kinetic_reserve(
+    v_norm: float | NDArray[np.float64], cfg: IEMSConfig
+) -> float | NDArray[np.float64]:
+    """Part de SOC à réserver pour la récupération de l'énergie cinétique à ``v_norm``."""
+    ems = cfg.ems
+    e_kin = 0.5 * cfg.vehicle.mass_kg * (np.asarray(v_norm) * ems.v_norm_max) ** 2
+    return ems.kinetic_recovery * e_kin / cfg.battery.E_cap_J
+
+
 def build_usage_table(cfg: IEMSConfig) -> NDArray[np.float64]:
     """Table ``[schéma, v_norm, soc_norm]`` des usages batterie aux nœuds de ``_GRID``."""
     ems, bat = cfg.ems, cfg.battery
-    sn_ref = (ems.soc_ref - bat.soc_min) / (bat.soc_max - bat.soc_min)
+    width = bat.soc_max - bat.soc_min
     vn, sn = np.meshgrid(_GRID, _GRID, indexing="ij")
-    table = np.empty((len(DrivingPattern), len(_GRID), len(_GRID)))
+    soc = bat.soc_min + sn * width
+    soc_ref_v = ems.soc_ref - kinetic_reserve(vn, cfg)
+    table = np.empty((len(DrivingPattern), N_GRID, N_GRID))
     for p in DrivingPattern:
-        base = ems.usage_table[p]
-        table[p] = base + ems.usage_soc_gain * (sn - sn_ref) - ems.usage_v_gain * (vn - 0.5)
+        table[p] = ems.usage_table[p] + ems.usage_soc_gain * (soc - soc_ref_v) / width
     return np.clip(table, 0.0, 1.0)
 
 
 def _bilinear(table2d: NDArray[np.float64], x: float, y: float) -> float:
     """Interpolation bilinéaire sur la grille régulière ``_GRID`` × ``_GRID`` (entrées saturées)."""
-    n = len(_GRID) - 1
+    n = N_GRID - 1
     fx = min(max(x, 0.0), 1.0) * n
     fy = min(max(y, 0.0), 1.0) * n
     i, j = min(int(fx), n - 1), min(int(fy), n - 1)
@@ -71,6 +95,10 @@ class Balance:
         self.battery = battery
         self.table = build_usage_table(cfg)
 
+    def soc_ref(self, v: float) -> float:
+        """Référence de SOC à la vitesse ``v`` (m/s), réserve cinétique déduite."""
+        return float(self.cfg.ems.soc_ref - kinetic_reserve(v / self.cfg.ems.v_norm_max, self.cfg))
+
     def usage(self, v: float, soc: float, pattern: DrivingPattern) -> float:
         bat = self.cfg.battery
         v_norm = v / self.cfg.ems.v_norm_max
@@ -89,4 +117,4 @@ class Balance:
     def step(self, v: float, soc: float, pattern: DrivingPattern) -> BalanceOutput:
         u = self.usage(v, soc, pattern)
         lo, hi, target = self.soc_target(soc, u)
-        return BalanceOutput(u, lo, hi, target, self.costate(soc, target))
+        return BalanceOutput(u, self.soc_ref(v), lo, hi, target, self.costate(soc, target))

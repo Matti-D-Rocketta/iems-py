@@ -76,7 +76,7 @@ class _Base:
 
     def _candidates(self, obs: EMSObservation) -> CandidateSet:
         return build_candidates(
-            obs.P_fc, obs.P_dem_pred, obs.soc, obs.P_bat, self.cfg, self.fc, self.battery
+            obs.P_fc, obs.P_dem_pred, obs.soc, obs.P_bat, self.cfg, self.fc, self.battery, obs.v
         )
 
     def _next_demand(self, obs: EMSObservation) -> float:
@@ -158,6 +158,7 @@ class IEMS(_Base):
         info = {
             "lam": bal.lam,
             "soc_target": bal.soc_target,
+            "soc_ref_v": bal.soc_ref_v,
             "usage": bal.usage,
             "pattern": int(pattern),
             "j_star": out.j_star,

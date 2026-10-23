@@ -118,28 +118,31 @@ class EMSParams(_Params):
     # Co-état λ (facteur d'équivalence, sans dimension grâce à k_h, cf. optimizer.py).
     # λ0 calibré en M1 par dichotomie ECMS sur WLTC (voir examples/compare_strategies.py).
     lambda0: float = 1.55  # TODO-thèse : recalé par calibration ecms_const (M1)
-    Kp: float = 10.0  # TODO-thèse : gain proportionnel d'adaptation du co-état
+    Kp: float = 5.0  # TODO-thèse : gain proportionnel d'adaptation du co-état
     lambda_min: float = 0.5
     lambda_max: float = 5.0
 
     # Balance : usage batterie = table(schéma) modulée par SOC et vitesse normalisés.
     usage_table: dict[DrivingPattern, float] = Field(default_factory=_default_usage_table)
-    usage_soc_gain: float = 6.0  # TODO-thèse : pente de l'usage vs SOC normalisé
-    usage_v_gain: float = 0.10  # TODO-thèse : pente de l'usage vs vitesse normalisée
-    soc_ref: float = 0.60  # SOC de référence (milieu haut de la fenêtre) — TODO-thèse
+    usage_soc_gain: float = 3.0  # TODO-thèse : pente de l'usage vs écart de SOC normalisé
+    soc_ref: float = 0.60  # SOC de référence à l'arrêt (milieu haut de la fenêtre) — TODO-thèse
+    # Fraction de l'énergie cinétique qui revient effectivement dans la batterie au freinage
+    # (pertes aéro/roulement pendant le freinage, η_trans, η_ch, écrêtage à P_ch_max).
+    kinetic_recovery: float = Field(0.75, ge=0, le=1)  # TODO-thèse : ≈ 0,8 mesuré sur WLTC
     v_norm_max: float = 36.1  # 130 km/h : vitesse de normalisation
 
     # Admissibilité : marge de sécurité appliquée aux limites batterie dans l'anticipation.
     safety_margin: float = Field(0.05, ge=0, lt=1)  # relative
     safety_margin_W: float = Field(1e3, ge=0)  # absolue (W)
-    prediction_margin: float = Field(0.10, ge=0, lt=1)  # relative à la demande prédite
+    prediction_margin: float = Field(0.05, ge=0, lt=1)  # relative à la demande prédite
+    prediction_margin_accel: float = Field(0.10, ge=0)  # m/s² : incertitude d'accélération à 1 s
 
     # DPR v1 (règles à seuils sur fenêtre glissante).
     dpr_window_s: float = Field(60.0, gt=0)
 
     # Prédicteur v1 (oracle bruité).
-    predictor_noise: float = Field(0.05, ge=0)  # écart-type du biais d'amplitude à t+Hp
-    predictor_time_warp: float = Field(0.10, ge=0)  # écart-type de l'étirement temporel
+    predictor_noise: float = Field(0.03, ge=0)  # écart-type du biais d'amplitude à t+Hp
+    predictor_time_warp: float = Field(0.03, ge=0)  # écart-type de l'étirement temporel
     seed: int = 42
 
     # Baseline « power follower » + hystérésis SOC.

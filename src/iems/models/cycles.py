@@ -21,7 +21,6 @@ from importlib import resources
 
 import numpy as np
 from numpy.typing import NDArray
-from scipy.interpolate import PchipInterpolator
 
 from iems.patterns import DrivingPattern
 
@@ -53,15 +52,16 @@ class Cycle:
         return float(np.trapezoid(self.v, self.t))
 
     def resample(self, dt: float) -> Cycle:
-        """Rééchantillonne sur une grille régulière de pas ``dt``.
+        """Rééchantillonne sur une grille régulière de pas ``dt`` (interpolation linéaire).
 
-        Interpolation cubique monotone (PCHIP) : pas de dépassement (vitesses ≥ 0, arrêts
-        préservés) et accélération continue, donc pas de marches de puissance artificielles
-        entre deux points à 1 Hz.
+        Linéaire, comme le prescrit la procédure WLTP pour les cycles à 1 Hz : l'accélération
+        est constante entre deux points, donc la puissance demandée ne dépasse jamais celle
+        que le profil 1 Hz implique. Une interpolation cubique (même monotone) peut tripler
+        localement la dérivée et créer des pics de puissance qui n'existent pas dans le cycle.
         """
         n = round(self.duration / dt) + 1
         t_new = self.t[0] + dt * np.arange(n)
-        v_new = np.maximum(PchipInterpolator(self.t, self.v)(np.minimum(t_new, self.t[-1])), 0.0)
+        v_new = np.interp(t_new, self.t, self.v)
         labels = None
         if self.labels is not None:
             idx = np.clip(np.searchsorted(self.t, t_new, side="right") - 1, 0, len(self.t) - 1)

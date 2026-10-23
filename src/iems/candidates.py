@@ -79,14 +79,34 @@ def dilate(
     return hi, lo
 
 
+def prediction_margin_W(
+    p_abs: NDArray[np.float64], v: float, cfg: IEMSConfig
+) -> NDArray[np.float64]:
+    """Marge (W) sur la demande prédite : part relative + incertitude d'accélération.
+
+    La puissance demandée dépend de l'accélération, dérivée de la vitesse prédite : à 110 km/h,
+    1 km/h d'erreur sur la vitesse à 1 s vaut ≈ 15 kW (``m·v·Δa/η``). La marge inertielle
+    ``m · v · σ_a / η_trans`` capture cette sensibilité ; elle est faible en ville, forte sur
+    autoroute, là où l'erreur l'est aussi.
+    """
+    ems, veh = cfg.ems, cfg.vehicle
+    inertial = veh.mass_kg * v * ems.prediction_margin_accel / veh.eta_trans
+    return ems.prediction_margin * np.abs(p_abs) + inertial
+
+
 def anticipation_bounds(
     p_max: NDArray[np.float64],
     p_min: NDArray[np.float64],
     soc: float,
     cfg: IEMSConfig,
     battery: Battery,
+    v: float = 0.0,
+    margin_scale: float = 1.0,
 ) -> tuple[float, float]:
-    """Plancher et plafond sur la consigne PàC, déduits de la demande prédite par intervalle."""
+    """Plancher et plafond sur la consigne PàC, déduits de la demande prédite par intervalle.
+
+    ``margin_scale`` ∈ [0, 1] module les marges de prédiction (1 = pleines, 0 = aucune).
+    """
     ems = cfg.ems
     bp = battery.p
     # Limites évaluées au SOC le plus défavorable atteignable en un pas EMS (près des bornes,
@@ -98,10 +118,10 @@ def anticipation_bounds(
     P_ch = max(battery.charge_limit(soc + d_soc) * keep - ems.safety_margin_W, 0.0)
     # Marge de rampe : à partir de l'intervalle 2, la PàC peut encore bouger de r·Ts par pas.
     slack = cfg.fuel_cell.ramp_W_per_s * ems.Ts_ems * np.maximum(np.arange(len(p_max)) - 1, 0)
-    # Marge de prédiction proportionnelle à la demande : l'erreur croît avec elle.
-    k = ems.prediction_margin
-    floor = float(np.max(p_max + k * np.abs(p_max) - P_dis - slack))
-    cap = np.maximum(p_min - k * np.abs(p_min), cfg.vehicle.P_aux_W) + P_ch
+    m_hi = margin_scale * prediction_margin_W(p_max, v, cfg)
+    m_lo = margin_scale * prediction_margin_W(p_min, v, cfg)
+    floor = float(np.max(p_max + m_hi - P_dis - slack))
+    cap = np.maximum(p_min - m_lo, cfg.vehicle.P_aux_W) + P_ch
     ceiling = float(np.min(cap + slack))
     return floor, ceiling
 
@@ -114,22 +134,40 @@ def build_candidates(
     cfg: IEMSConfig,
     fc: FuelCell,
     battery: Battery,
+    v: float = 0.0,
 ) -> CandidateSet:
     """Construit les bornes utilisables et les 9 candidats (ou le vecteur de secours).
 
     ``P_dem_pred`` : demande prédite au pas modèle depuis l'instant courant (indice 0)
     jusqu'à ``t + Hp``. Pour une stratégie sans prédiction, passer ``[P_dem(t)]``.
+    ``v`` : vitesse courante (m/s), pour la marge inertielle de prédiction.
     """
     ems = cfg.ems
     P_lo, P_hi = fc.ramp_limits(P_fc_now, ems.Ts_ems)
 
     p_max, p_min, p_mean = interval_extrema(np.asarray(P_dem_pred, dtype=float), ems.substeps)
-    floor, ceiling = anticipation_bounds(*dilate(p_max, p_min), soc, cfg, battery)
-    conflict = floor > ceiling
-    if conflict:
-        # Les marges sont conservatrices : couper la poire en deux laisse les deux limites
-        # réelles (sans marge) respectées tant que le recouvrement reste inférieur aux marges.
-        floor = ceiling = 0.5 * (floor + ceiling)
+    d_hi, d_lo = dilate(p_max, p_min)
+    floor, ceiling = anticipation_bounds(d_hi, d_lo, soc, cfg, battery, v)
+    conflict = False
+    if floor > ceiling:
+        # Les marges de prédiction se contredisent : on les réduit juste assez (recherche du
+        # facteur d'échelle par dichotomie, les bornes étant monotones en ce facteur) pour
+        # retrouver une plage admissible. Si même sans marge c'est impossible (marche de
+        # demande hors de portée PàC + batterie), on coupe la poire en deux : conflit réel.
+        f0, c0 = anticipation_bounds(d_hi, d_lo, soc, cfg, battery, v, margin_scale=0.0)
+        if f0 > c0:
+            conflict = True
+            floor = ceiling = 0.5 * (f0 + c0)
+        else:
+            lo_s, hi_s = 0.0, 1.0
+            for _ in range(12):
+                mid = 0.5 * (lo_s + hi_s)
+                f, c = anticipation_bounds(d_hi, d_lo, soc, cfg, battery, v, margin_scale=mid)
+                lo_s, hi_s = (mid, hi_s) if f <= c else (lo_s, mid)
+            floor, ceiling = anticipation_bounds(
+                d_hi, d_lo, soc, cfg, battery, v, margin_scale=lo_s
+            )
+            floor = ceiling = 0.5 * (floor + ceiling)
 
     lo = max(P_lo, min(floor, P_hi))
     hi = max(min(P_hi, ceiling), lo)
