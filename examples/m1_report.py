@@ -195,7 +195,12 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    ap.add_argument("--out", type=Path, default=Path("docs"))
+    ap.add_argument(
+        "--out",
+        type=Path,
+        default=Path("examples/output"),
+        help="dossier de sortie (docs pour mettre à jour la référence versionnée)",
+    )
     args = ap.parse_args(argv)
     out: Path = args.out
     out.mkdir(parents=True, exist_ok=True)
@@ -221,7 +226,7 @@ def main(argv: list[str] | None = None) -> int:
     lines = [
         "# Rapport de conformité — jalon M1",
         "",
-        f"Généré par `examples/m1_report.py` ({elapsed:.0f} s). Configuration : valeurs par "
+        "Généré par `examples/m1_report.py`. Configuration : valeurs par "
         f"défaut de `config.py` (SOC initial {cfg.soc0:.2f}, Ts_model {cfg.ems.Ts_model} s, "
         f"Ts_ems {cfg.ems.Ts_ems} s, Hp {cfg.ems.Hp:.0f} s, λ0 {cfg.ems.lambda0}, "
         f"Kp {cfg.ems.Kp}).",

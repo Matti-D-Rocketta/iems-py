@@ -21,7 +21,7 @@ Le simulateur compare l'iEMS à deux références sur WLTC et sur des cycles syn
 ```bash
 python -m venv .venv && .venv/Scripts/pip install -e ".[dev]"     # Linux/mac : .venv/bin/pip
 python examples/compare_strategies.py                                # tableau + figures (examples/output)
-python examples/m1_report.py                                         # rapport de conformité M1 (docs/)
+python examples/m1_report.py                                         # rapport M1 (examples/output ; --out docs = référence)
 ```
 
 Python ≥ 3.11 ; dépendances : numpy, scipy, pydantic, matplotlib. Aucune dépendance MATLAB,

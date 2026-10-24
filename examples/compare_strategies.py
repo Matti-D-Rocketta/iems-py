@@ -126,7 +126,6 @@ def table_rows(runs: list[CycleRun]) -> list[dict[str, object]]:
                     "η_fc moy": round(m.eta_fc_mean, 3),
                     "violations": m.violations.total,
                     "bilan %": f"{100 * m.energy.rel_error:.1e}",
-                    "calcul s": round(m.runtime_s, 2),
                 }
             )
     return rows
