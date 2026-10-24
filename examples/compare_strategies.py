@@ -146,7 +146,7 @@ def markdown_table(rows: list[dict[str, object]]) -> str:
 def write_table(rows: list[dict[str, object]], out: Path) -> None:
     out.mkdir(parents=True, exist_ok=True)
     with (out / "compare_strategies.csv").open("w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=list(rows[0]))
+        w = csv.DictWriter(f, fieldnames=list(rows[0]), lineterminator="\n")  # LF partout
         w.writeheader()
         w.writerows(rows)
     note = (
