@@ -386,6 +386,8 @@ def make_figures(runs: list[CycleRun], cfg: IEMSConfig, out: Path) -> list[Path]
 
 
 def main(argv: list[str] | None = None) -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # console Windows cp1252
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )

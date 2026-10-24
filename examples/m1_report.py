@@ -190,6 +190,8 @@ def sensitivity(cfg: IEMSConfig) -> list[dict[str, object]]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # console Windows cp1252
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -223,6 +225,9 @@ def main(argv: list[str] | None = None) -> int:
         f"défaut de `config.py` (SOC initial {cfg.soc0:.2f}, Ts_model {cfg.ems.Ts_model} s, "
         f"Ts_ems {cfg.ems.Ts_ems} s, Hp {cfg.ems.Hp:.0f} s, λ0 {cfg.ems.lambda0}, "
         f"Kp {cfg.ems.Kp}).",
+        "",
+        "Le cycle `wltc` est une reconstruction structurelle du WLTC classe 3b (durées, distances "
+        "et vitesses max des 4 phases conformes au GTR 15), pas la table officielle point à point.",
         "",
         "## Critères d'acceptation",
         "",

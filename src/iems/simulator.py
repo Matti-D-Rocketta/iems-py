@@ -53,6 +53,7 @@ class SimResult:
     P_spill: FloatArray
     P_unmet: FloatArray
     soc: FloatArray
+    m_h2: FloatArray  # masse d'H2 consommée cumulée (kg), N+1 points
     # pas EMS
     t_ems: FloatArray
     FC_Power_cmd: FloatArray
@@ -93,6 +94,8 @@ def simulate(
     c = cycle.resample(dt)
     dem = power_demand(c.t, c.v, cfg.vehicle)
     N = len(c.t) - 1
+    if N < 1:
+        raise ValueError("cycle trop court : au moins deux échantillons après rééchantillonnage")
     n_ems = -(-N // n_sub)
     if predictor is None:
         predictor = NoisyOraclePredictor(
@@ -107,6 +110,8 @@ def simulate(
     spill_log = np.zeros(N)
     unmet_log = np.zeros(N)
     soc_log = np.zeros(N + 1)
+    h2_log = np.zeros(N + 1)
+    lhv = cfg.fuel_cell.lhv_J_per_kg
     t_ems = np.zeros(n_ems)
     fc_cmd = np.zeros(n_ems)
     bat_cmd = np.zeros(n_ems)
@@ -176,6 +181,7 @@ def simulate(
             P_fc_log[i], P_bat_log[i] = P_fc, P_bat
             fr_log[i], spill_log[i], unmet_log[i] = friction, spill, unmet
             soc_log[i + 1] = soc
+            h2_log[i + 1] = h2_log[i] + (fc.a + fc.b * P_fc + fc.c * P_fc * P_fc) / lhv * dt
 
     return SimResult(
         cycle=cycle,
@@ -190,6 +196,7 @@ def simulate(
         P_spill=spill_log,
         P_unmet=unmet_log,
         soc=soc_log,
+        m_h2=h2_log,
         t_ems=t_ems,
         FC_Power_cmd=fc_cmd,
         BAT_Power_cmd=bat_cmd,

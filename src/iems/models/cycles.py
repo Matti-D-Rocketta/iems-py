@@ -381,7 +381,7 @@ def load_wltc() -> Cycle:
         v,
         None,
         "WLTC classe 3b (reconstruction structurelle, cf. cycles.py)",
-        {"phase_bounds_s": WLTC_PHASE_BOUNDS_S},
+        {"phase_bounds_s": WLTC_PHASE_BOUNDS_S, "reconstruction": True},
     )
 
 

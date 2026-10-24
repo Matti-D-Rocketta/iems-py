@@ -79,11 +79,6 @@ class _Base:
             obs.P_fc, obs.P_dem_pred, obs.soc, obs.P_bat, self.cfg, self.fc, self.battery, obs.v
         )
 
-    def _next_demand(self, obs: EMSObservation) -> float:
-        """Demande moyenne prédite sur le prochain intervalle EMS."""
-        n = self.cfg.ems.substeps
-        return float(np.mean(obs.P_dem_pred[: n + 1]))
-
     @staticmethod
     def _cand_info(c: CandidateSet) -> dict[str, Any]:
         return {"P_lo": c.P_lo, "P_hi": c.P_hi, "degenerate": c.degenerate, "conflict": c.conflict}
@@ -121,7 +116,7 @@ class RulesBaseline(_Base):
         c = self._candidates(obs)
         cmd = min(max(target, c.P_lo), c.P_hi)
         info = {"mode": self._mode, **self._cand_info(c)}
-        return EMSCommand(cmd, self._next_demand(obs) - cmd, info)
+        return EMSCommand(cmd, c.P_dem_next - cmd, info)
 
 
 class ECMSConst(_Base):
@@ -135,7 +130,7 @@ class ECMSConst(_Base):
 
     def step(self, obs: EMSObservation) -> EMSCommand:
         c = self._candidates(obs)
-        out = optimize(c, self._next_demand(obs), self.lam, self.fc, self.battery)
+        out = optimize(c, c.P_dem_next, self.lam, self.fc, self.battery)
         info = {"lam": self.lam, "j_star": out.j_star, **self._cand_info(c)}
         return EMSCommand(out.FC_Power_cmd, out.BAT_Power_cmd, info)
 
@@ -154,7 +149,7 @@ class IEMS(_Base):
         pattern: DrivingPattern = self.dpr.recognize(obs.v_hist)
         bal = self.balance.step(obs.v, obs.soc, pattern)
         c = self._candidates(obs)
-        out = optimize(c, self._next_demand(obs), bal.lam, self.fc, self.battery)
+        out = optimize(c, c.P_dem_next, bal.lam, self.fc, self.battery)
         info = {
             "lam": bal.lam,
             "soc_target": bal.soc_target,
@@ -176,12 +171,10 @@ STRATEGIES: dict[str, Callable[..., Strategy]] = {
 
 def make_strategy(name: str, cfg: IEMSConfig, **kwargs: Any) -> Strategy:
     """Instancie une stratégie du registre par son nom."""
-    try:
-        return STRATEGIES[name](cfg, **kwargs)
-    except KeyError:
-        raise KeyError(
-            f"stratégie inconnue : {name!r} (disponibles : {list(STRATEGIES)})"
-        ) from None
+    factory = STRATEGIES.get(name)
+    if factory is None:
+        raise KeyError(f"stratégie inconnue : {name!r} (disponibles : {list(STRATEGIES)})")
+    return factory(cfg, **kwargs)
 
 
 @dataclass(frozen=True)

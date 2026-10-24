@@ -7,8 +7,8 @@ Pipeline du bloc (section 4.3 de la passation) :
    interface) :
 
    * **schéma de conduite** : usage nominal (sportif ≈ 0,85 ; autoroute ≈ 0,30 ; trafic et
-     urbain intermédiaires). ``u = 0,5`` est neutre (λ = λ0) ; au-dessus, l'EMS sollicite la
-     batterie, en dessous il la recharge ;
+     urbain intermédiaires). ``u ≈ 0,5`` est neutre (λ ≈ λ0, à l'asymétrie η_ch/η_dis de la
+     plage atteignable près) ; au-dessus, l'EMS sollicite la batterie, en dessous il la recharge ;
    * **réserve cinétique** : la référence de SOC baisse avec la vitesse,
      ``SOC_ref(v) = soc_ref − kinetic_recovery · ½·m·v² / E_cap``. À 120 km/h, le véhicule
      « stocke » ≈ 1 MJ d'énergie cinétique dont une partie reviendra dans la batterie au

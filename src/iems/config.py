@@ -35,7 +35,7 @@ class FuelCellParams(_Params):
     """Système pile à combustible : carte de rendement en cloche, bornes et rampe."""
 
     P_max_W: float = Field(95e3, gt=0)  # TODO-thèse
-    P_min_W: float = Field(1e3, ge=0)  # TODO-thèse : puissance de ralenti
+    P_min_W: float = Field(1e3, gt=0)  # TODO-thèse : ralenti (v1 : la pile ne se coupe pas)
     ramp_W_per_s: float = Field(5e3, gt=0)  # TODO-thèse : rampe BOP
     # Carte η(P/P_max) en cloche : ≈0,40 à 3 %, pic ≈0,58 vers 20 %, ≈0,45 à pleine charge
     # (littérature : allure typique d'un système PEMFC automobile avec auxiliaires). Les points
@@ -117,10 +117,11 @@ class EMSParams(_Params):
 
     # Co-état λ (facteur d'équivalence, sans dimension grâce à k_h, cf. optimizer.py).
     # λ0 calibré en M1 par dichotomie ECMS sur WLTC (voir examples/compare_strategies.py).
-    lambda0: float = 1.55  # TODO-thèse : recalé par calibration ecms_const (M1)
+    # λ0 = λ* de la dichotomie ecms_const sur WLTC (examples/compare_strategies.py) — TODO-thèse
+    lambda0: float = 1.51
     Kp: float = 5.0  # TODO-thèse : gain proportionnel d'adaptation du co-état
-    lambda_min: float = 0.5
-    lambda_max: float = 5.0
+    lambda_min: float = 0.5  # littérature : bornes larges du facteur d'équivalence
+    lambda_max: float = 5.0  # littérature
 
     # Balance : usage batterie = table(schéma) modulée par SOC et vitesse normalisés.
     usage_table: dict[DrivingPattern, float] = Field(default_factory=_default_usage_table)
@@ -132,24 +133,25 @@ class EMSParams(_Params):
     v_norm_max: float = 36.1  # 130 km/h : vitesse de normalisation
 
     # Admissibilité : marge de sécurité appliquée aux limites batterie dans l'anticipation.
-    safety_margin: float = Field(0.05, ge=0, lt=1)  # relative
-    safety_margin_W: float = Field(1e3, ge=0)  # absolue (W)
+    safety_margin: float = Field(0.05, ge=0, lt=1)  # relative — TODO-thèse
+    safety_margin_W: float = Field(1e3, ge=0)  # absolue (W) — TODO-thèse
     prediction_margin: float = Field(0.05, ge=0, lt=1)  # relative à la demande prédite
     prediction_margin_accel: float = Field(0.10, ge=0)  # m/s² : incertitude d'accélération à 1 s
 
     # DPR v1 (règles à seuils sur fenêtre glissante).
-    dpr_window_s: float = Field(60.0, gt=0)
+    dpr_window_s: float = Field(60.0, gt=0)  # TODO-thèse : fenêtre glissante du DPR
 
     # Prédicteur v1 (oracle bruité).
-    predictor_noise: float = Field(0.03, ge=0)  # écart-type du biais d'amplitude à t+Hp
-    predictor_time_warp: float = Field(0.03, ge=0)  # écart-type de l'étirement temporel
-    seed: int = 42
+    # Erreurs spécifiées à τ = 10 s (NOISE_HORIZON_S), ordre de grandeur LSTM de la littérature.
+    predictor_noise: float = Field(0.03, ge=0)  # écart-type relatif du biais d'amplitude à 10 s
+    predictor_time_warp: float = Field(0.03, ge=0)  # écart-type de l'erreur de calendrier à 10 s
+    seed: int = 42  # déterminisme (section 7)
 
     # Baseline « power follower » + hystérésis SOC.
-    baseline_tau_s: float = Field(5.0, gt=0)  # constante de temps du filtre passe-bas
-    baseline_soc_low: float = 0.50  # entrée en mode recharge
-    baseline_soc_high: float = 0.62  # sortie du mode recharge
-    baseline_charge_W: float = 8e3  # surplus PàC en mode recharge
+    baseline_tau_s: float = Field(5.0, gt=0)  # constante de temps du filtre — TODO-thèse
+    baseline_soc_low: float = 0.50  # entrée en mode recharge — TODO-thèse
+    baseline_soc_high: float = 0.62  # entrée en mode délestage — TODO-thèse
+    baseline_charge_W: float = 8e3  # surplus PàC en mode recharge — TODO-thèse
 
     @model_validator(mode="after")
     def _check_rates(self) -> EMSParams:
@@ -158,6 +160,11 @@ class EMSParams(_Params):
             raise ValueError("Ts_ems doit être un multiple entier de Ts_model")
         if self.Hp < self.Ts_ems:
             raise ValueError("Hp doit être >= Ts_ems")
+        missing = [p.label for p in DrivingPattern if p not in self.usage_table]
+        if missing:
+            raise ValueError(f"usage_table incomplète : {missing}")
+        if any(not 0.0 <= u <= 1.0 for u in self.usage_table.values()):
+            raise ValueError("usage_table : valeurs attendues dans [0, 1]")
         return self
 
     @property
@@ -173,7 +180,9 @@ class IEMSConfig(_Params):
     fuel_cell: FuelCellParams = Field(default_factory=FuelCellParams)
     battery: BatteryParams = Field(default_factory=BatteryParams)
     ems: EMSParams = Field(default_factory=EMSParams)
-    soc0: float = Field(0.60, ge=0, le=1)  # SOC initial
+    # SOC initial. Près de soc_max, la batterie n'absorbe plus rien : à l'arrêt, le ralenti de la
+    # pile (P_min > P_aux) ne peut pas être écoulé, d'où des dépassements structurels.
+    soc0: float = Field(0.60, ge=0, le=1)
 
     @model_validator(mode="after")
     def _check_soc0(self) -> IEMSConfig:
@@ -181,11 +190,13 @@ class IEMSConfig(_Params):
             raise ValueError("soc0 hors de la fenêtre SOC utile")
         return self
 
-    def with_updates(self, **sections: dict) -> IEMSConfig:
-        """Copie avec mise à jour partielle, ex. ``cfg.with_updates(ems={"Kp": 5})``."""
+    def with_updates(self, **sections: object) -> IEMSConfig:
+        """Copie avec mise à jour partielle, ex. ``cfg.with_updates(ems={"Kp": 5}, soc0=0.5)``."""
         data = self.model_dump()
         for key, upd in sections.items():
-            if isinstance(upd, dict):
+            if key not in data:
+                raise KeyError(f"section inconnue : {key!r} (attendu : {sorted(data)})")
+            if isinstance(upd, dict) and isinstance(data[key], dict):
                 data[key].update(upd)
             else:
                 data[key] = upd

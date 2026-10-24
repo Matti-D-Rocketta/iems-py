@@ -39,11 +39,11 @@ print(compute_metrics(res).row())        # conso g/100 km, ΔSOC, violations, bi
 
 | Cycle | Règles (g/100 km) | ECMS λ constant* | iEMS | ΔSOC iEMS | Violations |
 |---|---|---|---|---|---|
-| WLTC classe 3b | 821,6 | 804,1 | **815,6** | +1,1 pt | 0 |
-| Synthétique mixte | 832,3 | 823,5 | **822,8** | +2,8 | 0 |
-| Urbain dense | 969,8 | 981,7 | **942,3** | +4,1 | 0 |
-| Route + autoroute | 936,4 | 923,6 | **929,2** | +1,0 | 0 |
-| Sportif | 890,9 | 879,9 | **879,6** | +2,9 | 0 |
+| WLTC classe 3b | 821,6 | 803,8 | **817,0** | −0,5 pt | 0 |
+| Synthétique mixte | 832,3 | 824,2 | **823,9** | +1,2 | 0 |
+| Urbain dense | 969,8 | 982,7 | **956,3** | +2,6 | 0 |
+| Route + autoroute | 936,4 | 922,5 | **928,2** | −1,1 | 0 |
+| Sportif | 890,9 | 883,1 | **880,8** | +0,1 | 0 |
 
 Consommations d'hydrogène corrigées du SOC final. \*L'ECMS à λ constant est calibré par
 dichotomie **avec une prédiction exacte** du cycle : c'est la référence quasi-optimale hors
@@ -55,7 +55,7 @@ hors ligne ; les hautes fréquences de la demande vont à la batterie, les basse
 le SOC suit une référence abaissée avec la vitesse (réserve pour la récupération au freinage),
 ce qui ramène le WLTC à ± 1 point de SOC sans connaître la fin du cycle. Adaptation au SOC
 initial (résultat de thèse reproduit) : parti de 35 % ou de 75 %, l'iEMS termine le WLTC au
-même SOC de 61 %, à 0 violation (table de sensibilité du rapport).
+même SOC (≈ 60 %), à 0 violation (table de sensibilité du rapport).
 
 ## Architecture
 
@@ -94,11 +94,14 @@ consignes PàC) → Balance (usage, SOC cible, λ) → Optimizer (argmin du Hami
 ## Qualité
 
 ```bash
-.venv/Scripts/python -m pytest -q          # tests : conservation d'énergie, bornes, dégénérescence, charge-sustaining…
+.venv/Scripts/python -m pytest -q          # 358 tests, ≈ 40 s
 .venv/Scripts/ruff check src tests examples
 ```
 
-Déterminisme garanti : graine fixée pour l'oracle bruité et le générateur de cycles.
+Les tests couvrent la conservation d'énergie (bilan de bus à chaque pas), les bornes et la
+dégénérescence des candidats, la monotonie des limites batterie, le charge-sustaining, les
+critères M1, le déterminisme (graine fixée pour l'oracle et le générateur de cycles) et la
+performance. Sous Windows, lancer Python avec `PYTHONUTF8=1` si la console est en cp1252.
 
 ## Feuille de route
 

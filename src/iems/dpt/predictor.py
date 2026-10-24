@@ -3,9 +3,12 @@
 v1 : **oracle bruité**. On lit la tranche future du cycle et on la déforme de deux façons,
 tirées à chaque appel (graine fixée : déterministe) :
 
-* **erreur de calendrier** : le temps prédit est déformé, ``τ' = τ + β·τ²/Hp`` (une
-  accélération prévue arrive trop tôt ou trop tard, jusqu'à ``β·Hp`` en bout d'horizon) ;
-* **erreur d'amplitude** : biais multiplicatif ``γ·(τ/Hp)²`` qui vaut ``γ`` en bout d'horizon.
+* **erreur de calendrier** : le temps prédit est déformé, ``τ' = τ + β·τ²/T_ref`` (une
+  accélération prévue arrive trop tôt ou trop tard, de ``β·T_ref`` à τ = T_ref) ;
+* **erreur d'amplitude** : biais multiplicatif ``γ·(τ/T_ref)²`` qui vaut ``γ`` à τ = T_ref.
+
+``T_ref = 10 s`` (``NOISE_HORIZON_S``) : l'erreur à τ secondes ne dépend pas de la longueur de
+l'horizon demandé (un Hp court ne rend pas le prédicteur moins précis à 1 s).
 
 Les deux erreurs sont **d'ordre 2 en τ** : nulles en valeur *et en pente* à l'instant
 courant. C'est la propriété physique d'un prédicteur embarqué : la vitesse et l'accélération
@@ -35,6 +38,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 FloatArray = NDArray[np.float64]
+NOISE_HORIZON_S = 10.0  # horizon de référence auquel noise et time_warp sont spécifiés
 
 
 class SpeedPredictor(Protocol):
@@ -68,7 +72,8 @@ class NoisyOraclePredictor:
         self.seed = seed
         self.rho = rho
         self._tau = np.arange(self.n_h + 1, dtype=float)  # en pas modèle
-        self._ramp2 = (self._tau / max(self.n_h, 1)) ** 2
+        self._tau_s = self._tau * dt / NOISE_HORIZON_S  # τ / T_ref
+        self._ramp2 = self._tau_s**2
         self.reset()
 
     def reset(self) -> None:
@@ -88,6 +93,6 @@ class NoisyOraclePredictor:
         self._gamma = self.rho * self._gamma + innov * float(self.rng.normal(0.0, self.noise))
         beta = float(np.clip(self._beta, -0.5, 0.5))
         gamma = self._gamma
-        tau_w = np.clip(self._tau * (1.0 + beta * self._tau / max(self.n_h, 1)), 0.0, self.n_h)
+        tau_w = np.clip(self._tau * (1.0 + beta * self._tau_s), 0.0, self.n_h)
         warped = np.interp(tau_w, self._tau, future)
         return np.maximum(warped * (1.0 + gamma * self._ramp2), 0.0)

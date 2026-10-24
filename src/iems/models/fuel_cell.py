@@ -67,4 +67,5 @@ class FuelCell:
     def ramp_limits(self, P_now: float, dt: float) -> tuple[float, float]:
         """Plage atteignable en ``dt`` compte tenu de la rampe et des bornes statiques."""
         dP = self.p.ramp_W_per_s * dt
+        P_now = self.clip(P_now)  # une plage inversée n'a pas de sens
         return max(self.p.P_min_W, P_now - dP), min(self.p.P_max_W, P_now + dP)

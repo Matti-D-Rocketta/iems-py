@@ -47,6 +47,7 @@ class CandidateSet:
     ceiling: float  # plafond anticipé (W)
     degenerate: bool  # vecteur de secours utilisé
     conflict: bool  # plancher > plafond : la batterie ne peut pas tout boucler
+    P_dem_next: float = 0.0  # demande moyenne prédite sur le prochain intervalle EMS (W)
 
 
 def interval_extrema(
@@ -143,9 +144,12 @@ def build_candidates(
     ``v`` : vitesse courante (m/s), pour la marge inertielle de prédiction.
     """
     ems = cfg.ems
+    P_dem_pred = np.asarray(P_dem_pred, dtype=float)
+    if P_dem_pred.size == 0:
+        raise ValueError("P_dem_pred est vide : il faut au moins la demande courante")
     P_lo, P_hi = fc.ramp_limits(P_fc_now, ems.Ts_ems)
 
-    p_max, p_min, p_mean = interval_extrema(np.asarray(P_dem_pred, dtype=float), ems.substeps)
+    p_max, p_min, p_mean = interval_extrema(P_dem_pred, ems.substeps)
     d_hi, d_lo = dilate(p_max, p_min)
     floor, ceiling = anticipation_bounds(d_hi, d_lo, soc, cfg, battery, v)
     conflict = False
@@ -203,4 +207,6 @@ def build_candidates(
         + np.maximum(np.abs(P_bat - P_bat_prev) - r_bat, 0.0)
     )
     valid = excess <= 1e-6
-    return CandidateSet(P_fc, P_bat, valid, excess, lo, hi, floor, ceiling, degenerate, conflict)
+    return CandidateSet(
+        P_fc, P_bat, valid, excess, lo, hi, floor, ceiling, degenerate, conflict, P_dem_next
+    )

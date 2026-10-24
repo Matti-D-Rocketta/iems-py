@@ -15,7 +15,6 @@ from dataclasses import asdict, dataclass, field
 import numpy as np
 
 from iems.models.battery import Battery
-from iems.models.fuel_cell import FuelCell
 from iems.simulator import SimResult
 
 _TOL_W = 1.0  # W : tolérance numérique sur les dépassements de puissance
@@ -91,10 +90,10 @@ class Metrics:
 def compute_metrics(res: SimResult) -> Metrics:
     cfg = res.cfg
     dt = res.dt
-    fc, bat = FuelCell(cfg.fuel_cell), Battery(cfg.battery)
+    bat = Battery(cfg.battery)
     lhv = cfg.fuel_cell.lhv_J_per_kg
 
-    m_h2 = float(np.sum(fc.h2_rate(res.P_fc)) * dt)
+    m_h2 = float(res.m_h2[-1])  # intégrée par le simulateur (= Σ ṁ(P_fc)·dt, P_fc constant par pas)
     E_fc = float(np.sum(res.P_fc) * dt)
     E_h2 = m_h2 * lhv
     eta_fc = E_fc / E_h2 if E_h2 > 0 else float(np.mean(cfg.fuel_cell.eta_map_eta))

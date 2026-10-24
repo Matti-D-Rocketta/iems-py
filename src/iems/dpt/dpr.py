@@ -33,8 +33,10 @@ class DPRFeatures:
 
 @dataclass(frozen=True)
 class DPRThresholds:
-    sport_a_p95: float = 1.6  # TODO-thèse : |a| au 95e centile au-delà duquel → Sportif
-    highway_v_mean: float = 85 * KMH  # TODO-thèse
+    # Seuils recalés par recherche en grille sur les 4 cycles synthétiques étiquetés (précision
+    # moyenne 0,80 → 0,87, rappel sportif 0,47 → 0,85) ; TODO-thèse : centres de classes FCM.
+    sport_a_p95: float = 1.3  # |a| au 95e centile au-delà duquel → Sportif
+    highway_v_mean: float = 95 * KMH
     road_v_mean: float = 50 * KMH  # TODO-thèse
     traffic_v_max: float = 30 * KMH  # TODO-thèse
     traffic_stop_ratio: float = 0.45  # TODO-thèse
@@ -84,7 +86,8 @@ class DrivingPatternRecognizer:
         self.dt = dt
         self.th = thresholds or DPRThresholds()
         self.default = default
-        self.min_samples = min_samples
+        # Jamais plus que la fenêtre, sinon le DPR resterait muet (toujours ``default``).
+        self.min_samples = min(min_samples, self.n)
 
     def recognize(self, v_hist: NDArray[np.float64]) -> DrivingPattern:
         """Schéma courant à partir des ``window_s`` dernières secondes de ``v_hist``."""
