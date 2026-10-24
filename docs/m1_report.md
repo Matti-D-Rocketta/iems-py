@@ -13,7 +13,7 @@ Le cycle `wltc` est une reconstruction structurelle du WLTC classe 3b (durées, 
 | ③ | Charge-sustaining iEMS : |ΔSOC| < 2 pts sur WLTC | **OK** | ΔSOC = -0.55 pts (SOC 0.60 → 0.595) |
 | ④ | Conso iEMS ≤ conso rules_baseline sur ≥ 4 cycles sur 5 | **OK** | 5/5 cycles ; écart iEMS vs règles (%, corrigé SOC) : {'wltc': -0.6, 'synth_mixed': -1.0, 'synth_urban': -1.4, 'synth_highway': -0.9, 'synth_sport': -1.1} |
 | ⑤ | Écart iEMS vs ecms_const calibré < 5 % | **OK** | écart max +1.6 % ; par cycle : {'wltc': 1.6, 'synth_mixed': -0.0, 'synth_urban': -2.7, 'synth_highway': 0.6, 'synth_sport': -0.3} (ECMS calibré hors ligne avec prédiction exacte) |
-| ⑥ | Figure « puissances + SOC + λ » type soutenance générée par script | **OK** | iems_wltc.png (265 ko), iems_synth_mixed.png (268 ko) |
+| ⑥ | Figure « puissances + SOC + λ » type soutenance générée par script | **OK** | iems_wltc.png (265 ko), iems_synth_mixed.png (269 ko) |
 
 **Bilan : 6/6 critères satisfaits.**
 

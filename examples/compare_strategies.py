@@ -62,10 +62,11 @@ SERIES = {  # la couleur suit l'entité, jamais son rang
     "ecms_const": C["aqua"],
     "iems": C["blue"],
 }
+PATTERN_EN = ["Traffic", "Urban", "Main road", "Highway", "Sporty"]
 PATTERN_COLORS = [C["blue"], C["orange"], C["aqua"], C["yellow"], C["magenta"]]
 STRATEGY_LABELS = {
-    "rules_baseline": "Règles (power follower)",
-    "ecms_const": "ECMS λ constant*",
+    "rules_baseline": "Rule-based (power follower)",
+    "ecms_const": "ECMS constant λ*",
     "iems": "iEMS",
 }
 
@@ -203,11 +204,11 @@ def plot_iems(cr: CycleRun, cfg: IEMSConfig, out: Path) -> Path:
 
     ax = axes[0]
     ax.plot(r.t / 60.0, r.v * 3.6, color=SERIES["P_dem"], linewidth=1.2)
-    _style(ax, "Vitesse (km/h)")
+    _style(ax, "Speed (km/h)")
 
     ax = axes[1]
     pat = info["pattern"]
-    ax.step(t_e, pat, where="post", color=C["text2"], linewidth=1.2, label="DPR (reconnu)")
+    ax.step(t_e, pat, where="post", color=C["text2"], linewidth=1.2, label="DPR (recognised)")
     if cr.cycle.labels is not None:
         truth = cr.cycle.resample(cfg.ems.Ts_ems).labels
         ax.step(
@@ -217,29 +218,31 @@ def plot_iems(cr: CycleRun, cfg: IEMSConfig, out: Path) -> Path:
             color=C["magenta"],
             linewidth=1.0,
             alpha=0.8,
-            label="vérité terrain",
+            label="ground truth",
         )
         _legend(ax, ncol=2)
     ax.set_yticks(range(5))
-    ax.set_yticklabels([p.label.replace(" principale", "") for p in DrivingPattern], fontsize=7)
+    ax.set_yticklabels(PATTERN_EN, fontsize=7)
     ax.set_ylim(-0.5, 4.5)
-    _style(ax, "Schéma")
+    _style(ax, "Pattern")
 
     ax = axes[2]
     ax.plot(
-        t_m, r.P_dem[:-1] / 1e3, color=SERIES["P_dem"], linewidth=0.9, alpha=0.85, label="demande"
+        t_m, r.P_dem[:-1] / 1e3, color=SERIES["P_dem"], linewidth=0.9, alpha=0.85, label="demand"
     )
-    ax.plot(t_m, r.P_fc / 1e3, color=SERIES["P_fc"], linewidth=1.4, label="pile (FC_Power_cmd)")
+    ax.plot(
+        t_m, r.P_fc / 1e3, color=SERIES["P_fc"], linewidth=1.4, label="fuel cell (FC_Power_cmd)"
+    )
     ax.plot(
         t_m,
         r.P_bat / 1e3,
         color=SERIES["P_bat"],
         linewidth=0.9,
         alpha=0.9,
-        label="batterie (BAT_Power_cmd)",
+        label="battery (BAT_Power_cmd)",
     )
     ax.axhline(0, color=C["grid"], linewidth=0.8)
-    _style(ax, "Puissance (kW)")
+    _style(ax, "Power (kW)")
     _legend(ax)
 
     ax = axes[3]
@@ -250,7 +253,7 @@ def plot_iems(cr: CycleRun, cfg: IEMSConfig, out: Path) -> Path:
         color=C["violet_light"],
         linewidth=1.0,
         linestyle="--",
-        label="SOC_ref(v) (réserve cinétique)",
+        label="SOC_ref(v) (kinetic reserve)",
     )
     ax.plot(
         t_e,
@@ -258,7 +261,7 @@ def plot_iems(cr: CycleRun, cfg: IEMSConfig, out: Path) -> Path:
         color=C["violet_light"],
         linewidth=0.8,
         linestyle=":",
-        label="SOC cible (fin d'horizon)",
+        label="SOC target (horizon end)",
     )
     for s in (cfg.battery.soc_min, cfg.battery.soc_max):
         ax.axhline(100 * s, color=C["grid"], linewidth=0.8)
@@ -280,7 +283,7 @@ def plot_iems(cr: CycleRun, cfg: IEMSConfig, out: Path) -> Path:
         color=C["text2"],
         linewidth=1.0,
         linestyle="--",
-        label=f"λ* ECMS hors ligne = {cr.lam_star:.3f}",
+        label=f"offline ECMS λ* = {cr.lam_star:.3f}",
     )
     ax.axhline(
         cfg.ems.lambda0,
@@ -289,12 +292,12 @@ def plot_iems(cr: CycleRun, cfg: IEMSConfig, out: Path) -> Path:
         linestyle=":",
         label=f"λ0 = {cfg.ems.lambda0:.2f}",
     )
-    _style(ax, "Co-état λ (–)")
-    ax.set_xlabel("Temps (min)", color=C["text2"], fontsize=9)
+    _style(ax, "Co-state λ (–)")
+    ax.set_xlabel("Time (min)", color=C["text2"], fontsize=9)
     _legend(ax, ncol=3)
 
     fig.suptitle(
-        f"iEMS sur {cr.cycle.name} — {m.h2_corr_g_per_100km:.0f} g H2/100 km (corrigé SOC), "
+        f"iEMS on {cr.cycle.name} — {m.h2_corr_g_per_100km:.0f} g H2/100 km (SOC-corrected), "
         f"{m.violations.total} violation(s), {m.distance_km:.1f} km",
         color=C["text"],
         fontsize=11,
@@ -331,12 +334,12 @@ def plot_comparison(cr: CycleRun, cfg: IEMSConfig, out: Path) -> Path:
     for s in (cfg.battery.soc_min, cfg.battery.soc_max):
         axes[0].axhline(100 * s, color=C["grid"], linewidth=0.8)
     _style(axes[0], "SOC (%)")
-    _style(axes[1], "Puissance pile (kW)")
+    _style(axes[1], "Fuel cell power (kW)")
     _legend(axes[0], ncol=3)
     _legend(axes[1], ncol=3)
-    axes[1].set_xlabel("Temps (min)", color=C["text2"], fontsize=9)
+    axes[1].set_xlabel("Time (min)", color=C["text2"], fontsize=9)
     fig.suptitle(
-        f"Trois stratégies sur {cr.cycle.name} (*ECMS calibré hors ligne, prédiction exacte)",
+        f"Three strategies on {cr.cycle.name} (*ECMS calibrated offline, exact prediction)",
         color=C["text"],
         fontsize=11,
         x=0.01,
@@ -368,12 +371,12 @@ def plot_usage_table(cfg: IEMSConfig, out: Path) -> Path:
             cmap="Blues",
             extent=(0, v[-1] * 3.6, 100 * soc[0], 100 * soc[-1]),
         )
-        ax.set_title(p.label, fontsize=9, color=C["text"])
+        ax.set_title(PATTERN_EN[p], fontsize=9, color=C["text"])
         ax.set_xlabel("v (km/h)", fontsize=8, color=C["text2"])
         ax.tick_params(colors=C["text2"], labelsize=8)
     axes[0].set_ylabel("SOC (%)", fontsize=8, color=C["text2"])
     cb = fig.colorbar(im, ax=axes, fraction=0.02, pad=0.01)
-    cb.set_label("usage batterie (0,5 = neutre)", fontsize=8, color=C["text2"])
+    cb.set_label("battery usage (0.5 = neutral)", fontsize=8, color=C["text2"])
     cb.ax.tick_params(colors=C["text2"], labelsize=8)
     path = out / "balance_usage_table.png"
     fig.savefig(path, dpi=150, facecolor=fig.get_facecolor(), bbox_inches="tight")

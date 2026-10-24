@@ -57,6 +57,10 @@ ce qui ramène le WLTC à ± 1 point de SOC sans connaître la fin du cycle. Ada
 initial (résultat de thèse reproduit) : parti de 35 % ou de 75 %, l'iEMS termine le WLTC au
 même SOC (≈ 60 %), à 0 violation (table de sensibilité du rapport).
 
+## Documentation
+
+Architecture et fonctionnement, du macro au détail, en anglais : [docs/iEMS_py_documentation.pdf](docs/iEMS_py_documentation.pdf) (source Markdown dans `docs/src/`, figures générées par `scripts/make_doc_figures.py`, document construit par `scripts/build_doc.py`).
+
 ## Architecture
 
 ```

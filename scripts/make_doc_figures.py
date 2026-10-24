@@ -879,12 +879,6 @@ def f10(out: Path) -> Path:
     ax.text(P_dem / 1e3 + 0.5, 0.44, "P_dem = 25 kW", fontsize=8, color=C["text2"])
     style_axes(ax, "fuel cell setpoint (kW)", "H (g H₂ equivalent / s)")
     legend(ax, ncol=3)
-    ax.set_title(
-        'A higher λ makes the battery "expensive": the minimum moves towards the fuel cell',
-        fontsize=9,
-        color=C["text"],
-        loc="left",
-    )
     return save(fig, out, "F10_hamiltonian")
 
 
