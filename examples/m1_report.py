@@ -18,6 +18,7 @@ from pathlib import Path
 
 from compare_strategies import (
     CycleRun,
+    fmt_residual,
     make_figures,
     markdown_table,
     run_campaign,
@@ -51,12 +52,13 @@ def check_criteria(runs: list[CycleRun], figures: list[Path]) -> list[Criterion]
 
     # ① bilan d'énergie bouclé à < 1 % sur WLTC
     worst = max(100 * m.energy.rel_error for m in wltc.metrics.values())
+    bus_max = max(r.max_bus_residual_W for r in wltc.results.values())
     c1 = Criterion(
         "①",
         "Bilan d'énergie bouclé à < 1 % sur WLTC",
         worst < 1.0,
-        f"erreur relative max sur les 3 stratégies : {worst:.1e} % "
-        f"(résidu de bus max {max(r.max_bus_residual_W for r in wltc.results.values()):.1e} W)",
+        f"erreur relative max sur les 3 stratégies : {fmt_residual(worst)} % "
+        f"(résidu de bus max {fmt_residual(bus_max)} W)",
     )
 
     # ② zéro violation de bornes sur 5 cycles

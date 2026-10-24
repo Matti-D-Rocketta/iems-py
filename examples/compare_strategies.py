@@ -104,6 +104,11 @@ def run_campaign(cycle_names: list[str], cfg: IEMSConfig, verbose: bool = True) 
 # --------------------------------------------------------------------------------------
 # Tableau
 # --------------------------------------------------------------------------------------
+def fmt_residual(x: float) -> str:
+    """Résidu numérique : « < 1e-9 » sous ce seuil (bruit flottant, dépend du processeur)."""
+    return "< 1e-9" if x < 1e-9 else f"{x:.1e}"
+
+
 def table_rows(runs: list[CycleRun]) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     for cr in runs:
@@ -125,7 +130,7 @@ def table_rows(runs: list[CycleRun]) -> list[dict[str, object]]:
                     "SOC max": round(m.soc_max, 3),
                     "η_fc moy": round(m.eta_fc_mean, 3),
                     "violations": m.violations.total,
-                    "bilan %": f"{100 * m.energy.rel_error:.1e}",
+                    "bilan %": fmt_residual(100 * m.energy.rel_error),
                 }
             )
     return rows
